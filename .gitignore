@@ -1,0 +1,17 @@
+# Cache and output directories (auto-generated, not tracked)
+covid_cache/
+covid_output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Environment
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
