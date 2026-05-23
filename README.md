@@ -5,6 +5,14 @@
 
 ---
 
+## Sample Output
+
+![Virginia COVID-19 Report](docs/sample_output.png)
+
+*Virginia 2020–2021: Weekly new cases/deaths (bar) + Cumulative cases/deaths (line)*
+
+---
+
 ## Overview
 
 An automated COVID-19 data pipeline that fetches real-time state-level data from the **CDC Socrata Open Data API**, applies statistical analysis, and exports charts, CSV reports, and interactive maps — all in a single Python script.
