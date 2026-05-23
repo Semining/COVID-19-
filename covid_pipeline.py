@@ -10,7 +10,7 @@ COVID-19 공공데이터 자동화 파이프라인
   After:  CDC 정부 공식 Socrata API 자동 수집 + 로컬 캐시 + 리포트 자동 저장
 
 Data Source: CDC Socrata Open Data API
-  https://data.cdc.gov/resource/9mfq-cb36.json
+  https://data.cdc.gov/resource/pwn4-m3yp.json
   (API Key 불필요, 무료 공개 API)
 
 Author  : Semin Seo
@@ -20,6 +20,7 @@ Version : 2.0 (Automated Pipeline)
 
 import sys
 import io
+import argparse
 import requests
 import pandas as pd
 import geopandas as gpd
@@ -360,26 +361,28 @@ class Visualizer:
 # 6. main
 # ═══════════════════════════════════════════════════════════
 
-def main():
-    BANNER = "=" * 58
-    print(BANNER)
-    print("  COVID-19 Automated Data Pipeline v2.0")
-    print("  Data Source : CDC Socrata Open Data API")
-    print("  Cache Dir   : ./covid_cache/")
-    print("  Output Dir  : ./covid_output/")
-    print(BANNER)
+def parse_args():
+    """CLI 인수 파서 — 스케줄러/자동화 실행 지원"""
+    parser = argparse.ArgumentParser(
+        description="COVID-19 Automated Data Pipeline v2.0",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument("--state",  type=str, help="State full name (e.g., Virginia)")
+    parser.add_argument("--name",   type=str, default="Auto", help="Your name (default: Auto)")
+    parser.add_argument("--option", type=str, choices=["1", "2"], default="1",
+                        help="1=Time-series chart (default)  2=Interactive map")
+    parser.add_argument("--states-all", action="store_true",
+                        help="Run for ALL 50 states (batch mode, option 1 only)")
+    return parser.parse_args()
 
-    name  = input("\nHello. Please enter your name: ").strip()
-    state = input(
-        "\nWhich state's COVID-19 data would you like?\n"
-        "  Enter the full state name (e.g., Virginia): "
-    ).strip().title()
+
+def run_pipeline(state: str, name: str, choice: str):
+    """단일 주(state) 파이프라인 실행 — interactive / CLI / 스케줄러 공용"""
 
     if state not in STATE_ABBR:
-        print(f"\n❌ '{state}' not found. Check spelling (e.g., 'Virginia', 'New York').")
-        return
+        print(f"[ERROR] '{state}' not found. Check spelling (e.g., 'Virginia', 'New York').")
+        return False
 
-    # ── 데이터 수집 ──────────────────────────────────────
     print(f"\n{'─'*58}")
     print(f"  Fetching data for {state} ...")
     print(f"{'─'*58}")
@@ -387,10 +390,9 @@ def main():
     fetcher = DataFetcher()
     df = fetcher.fetch(state)
 
-    # ── 통계 분석 ─────────────────────────────────────────
+    # ── 통계 분석 ──────────────────────────────────────
     first_date = DataAnalyzer.first_case_date(df)
-    print(f"\n📅 Day 0 of COVID-19 in {state}: "
-          f"{first_date.strftime('%B %d, %Y')}")
+    print(f"\n  Day 0 of COVID-19 in {state}: {first_date.strftime('%B %d, %Y')}")
 
     print(f"\n{'─'*58}")
     print(f"  {state} — Annual Statistics")
@@ -403,52 +405,100 @@ def main():
             continue
         summary_stats[year] = stats
         label = f" (from {first_date.strftime('%B %d')})" if year == 2020 else ""
-        print(f"\n{year}{label}:")
-        print(f"  - Total reported cases:    {stats['total_cases']:>14,.0f}")
-        print(f"  - Avg weekly new cases:    {stats['avg_daily_cases']:>14,.1f}")
-        print(f"  - Total reported deaths:   {stats['total_deaths']:>14,.0f}")
-        print(f"  - Avg weekly new deaths:   {stats['avg_daily_deaths']:>14,.1f}")
+        print(f"\n  {year}{label}:")
+        print(f"    Total reported cases:    {stats['total_cases']:>14,.0f}")
+        print(f"    Avg weekly new cases:    {stats['avg_daily_cases']:>14,.1f}")
+        print(f"    Total reported deaths:   {stats['total_deaths']:>14,.0f}")
+        print(f"    Avg weekly new deaths:   {stats['avg_daily_deaths']:>14,.1f}")
 
     overall = DataAnalyzer.overall_stats(df)
-    print(f"\n{'─'*58}")
-    print(f"  Overall Totals in {state} (as of Dec 31, 2021):")
-    print(f"{'─'*58}")
-    print(f"  - Total cases:   {overall['total_cases']:>14,.0f}")
-    print(f"  - Total deaths:  {overall['total_deaths']:>14,.0f}")
+    print(f"\n  Overall Totals in {state} (as of Dec 31, 2021):")
+    print(f"    Total cases:   {overall['total_cases']:>14,.0f}")
+    print(f"    Total deaths:  {overall['total_deaths']:>14,.0f}")
 
-    # ── 시각화 선택 ───────────────────────────────────────
-    print(f"\n{'─'*58}")
-    print(f"\n{name}, please select a visualization option:\n")
-    print(f"  1. Time-series subplots")
-    print(f"     Daily new + cumulative cases/deaths (2020–2021)")
-    print(f"\n  2. Interactive state map")
-    print(f"     Summary popup with total stats")
-    choice = input("\nEnter your choice (1 or 2): ").strip()
-
+    # ── 시각화 + 저장 ────────────────────────────────────
     saver = ReportSaver()
     print()
 
     if choice == "1":
-        print("  Generating time-series charts ...")
+        print(f"  Generating time-series charts ...")
         fig = Visualizer.plot_timeseries(df, state, name)
         saver.save_chart(fig, state)
         saver.save_stats_csv(summary_stats, state)
-        plt.show()
+        # 스케줄러 모드(stdin 없음)에선 plt.show() 생략
+        if sys.stdin.isatty():
+            plt.show()
+        else:
+            plt.close(fig)
 
     elif choice == "2":
-        print("  Generating interactive map ...")
+        print(f"  Generating interactive map ...")
         m = Visualizer.plot_choropleth(df, state)
         saver.save_map(m, state)
         map_path = OUTPUT_DIR / f"{state.replace(' ', '_')}_{date.today()}_map.html"
-        print(f"\n  Open this file in your browser to view the map:")
-        print(f"  {map_path.resolve()}")
+        print(f"  Map saved: {map_path.resolve()}")
 
-    else:
-        print("  Invalid choice. Please enter 1 or 2.")
+    print(f"  [Done] {state} — reports saved to {OUTPUT_DIR.resolve()}")
+    return True
+
+
+def main():
+    args = parse_args()
+
+    BANNER = "=" * 58
+    print(BANNER)
+    print("  COVID-19 Automated Data Pipeline v2.0")
+    print("  Data Source : CDC Socrata Open Data API")
+    print("  Cache Dir   : ./covid_cache/")
+    print("  Output Dir  : ./covid_output/")
+    print(BANNER)
+
+    # ── 모드 1: --states-all (50개 주 일괄 처리) ─────────
+    if args.states_all:
+        print(f"\n  [BATCH MODE] Running all {len(STATE_ABBR)} states ...\n")
+        success, fail = 0, []
+        for state_name in STATE_ABBR:
+            try:
+                ok = run_pipeline(state_name, args.name, "1")
+                if ok:
+                    success += 1
+            except Exception as e:
+                fail.append(f"{state_name}: {e}")
+        print(f"\n{'═'*58}")
+        print(f"  Batch complete: {success} succeeded, {len(fail)} failed")
+        if fail:
+            for f in fail:
+                print(f"  [FAIL] {f}")
+        print(f"{'═'*58}\n")
         return
 
+    # ── 모드 2: CLI 인수로 단일 주 실행 ──────────────────
+    if args.state:
+        state  = args.state.strip().title()
+        name   = args.name
+        choice = args.option
+        run_pipeline(state, name, choice)
+        print(f"\n{'═'*58}")
+        print(f"  Pipeline complete!")
+        print(f"  Reports saved to: {OUTPUT_DIR.resolve()}")
+        print(f"{'═'*58}\n")
+        return
+
+    # ── 모드 3: 대화형 (기존 방식) ───────────────────────
+    name  = input("\nHello. Please enter your name: ").strip()
+    state = input(
+        "\nWhich state's COVID-19 data would you like?\n"
+        "  Enter the full state name (e.g., Virginia): "
+    ).strip().title()
+
+    print(f"\n{name}, please select a visualization option:")
+    print(f"  1. Time-series subplots (PNG chart + CSV stats)")
+    print(f"  2. Interactive state map (HTML)")
+    choice = input("\nEnter your choice (1 or 2): ").strip()
+
+    run_pipeline(state, name, choice)
     print(f"\n{'═'*58}")
-    print(f"  ✅ Pipeline complete!")
+    print(f"  Pipeline complete!")
     print(f"  Reports saved to: {OUTPUT_DIR.resolve()}")
     print(f"{'═'*58}\n")
 
