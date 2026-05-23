@@ -1,6 +1,5 @@
 # COVID-19 Automated Data Pipeline
 
-**Course**: MIS433 Python Programming — George Mason University  
 **Author**: Semin Seo  
 **Version**: 2.0 (Automated Pipeline)
 
